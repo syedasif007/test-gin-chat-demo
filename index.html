@@ -1,0 +1,71 @@
+<label>Your name: <input id="username" placeholder="sam"></label>
+<button id="connect">Connect</button>
+
+<br><br>
+
+<label>Send to: <input id="recipient" placeholder="john"></label>
+<input id="message" placeholder="Message">
+<button id="send" disabled>Send</button>
+
+<pre id="output"></pre>
+
+<script>
+  const output = document.getElementById("output");
+  const sendButton = document.getElementById("send");
+  let ws;
+
+  document.getElementById("connect").onclick = () => {
+    const username = document.getElementById("username").value.trim();
+
+    if (!username) {
+      output.textContent += "Enter your name first.\n";
+      return;
+    }
+
+    // ws = new WebSocket(
+    //   `ws://localhost:8080/ws?user=${encodeURIComponent(username)}`
+    // );
+
+    ws = new WebSocket(
+        `wss://gin-chat-demo.onrender.com/ws?user=${encodeURIComponent(username)}`
+    );
+
+    ws.onopen = () => {
+      output.textContent += `Connected as ${username}\n`;
+      sendButton.disabled = false;
+    };
+
+    ws.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      output.textContent += message.type === "error"
+        ? `Error: ${message.text}\n`
+        : `${message.from} → ${message.to}: ${message.text}\n`;
+    };
+
+    ws.onclose = () => {
+      output.textContent += "Disconnected. Refresh and connect again.\n";
+      sendButton.disabled = true;
+    };
+
+    ws.onerror = () => {
+      output.textContent += "WebSocket error; check the Go server and browser console.\n";
+    };
+  };
+
+  sendButton.onclick = () => {
+    const to = document.getElementById("recipient").value.trim();
+    const text = document.getElementById("message").value.trim();
+
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      output.textContent += "Connect first.\n";
+      return;
+    }
+    if (!to || !text) {
+      output.textContent += "Enter a recipient and message.\n";
+      return;
+    }
+
+    ws.send(JSON.stringify({ to, text }));
+    document.getElementById("message").value = "";
+  };
+</script>
