@@ -1,9 +1,15 @@
-<label>Your name: <input id="username" placeholder="sam"></label>
+<label>
+  Your name:
+  <input id="username" placeholder="sam">
+</label>
 <button id="connect">Connect</button>
 
 <br><br>
 
-<label>Send to: <input id="recipient" placeholder="john"></label>
+<label>
+  Send to:
+  <input id="recipient" placeholder="john">
+</label>
 <input id="message" placeholder="Message">
 <button id="send" disabled>Send</button>
 
@@ -11,44 +17,73 @@
 
 <script>
   const output = document.getElementById("output");
+  const usernameInput = document.getElementById("username");
+  const connectButton = document.getElementById("connect");
   const sendButton = document.getElementById("send");
+
   let ws;
 
-  document.getElementById("connect").onclick = () => {
-    const username = document.getElementById("username").value.trim();
+  connectButton.onclick = () => {
+    // Disconnect if already connected or connecting.
+    if (ws && (
+      ws.readyState === WebSocket.OPEN ||
+      ws.readyState === WebSocket.CONNECTING
+    )) {
+      connectButton.disabled = true;
+      connectButton.textContent = "Disconnecting...";
+      ws.close();
+      return;
+    }
+
+    const username = usernameInput.value.trim();
 
     if (!username) {
       output.textContent += "Enter your name first.\n";
       return;
     }
 
-    // ws = new WebSocket(
-    //   `ws://localhost:8080/ws?user=${encodeURIComponent(username)}`
-    // );
+    connectButton.disabled = true;
+    connectButton.textContent = "Connecting...";
 
-    ws = new WebSocket(
-        `wss://gin-chat-demo.onrender.com/ws?user=${encodeURIComponent(username)}`
+    const connection = new WebSocket(
+      `wss://gin-chat-demo.onrender.com/ws?user=${encodeURIComponent(username)}`
     );
+    ws = connection;
 
-    ws.onopen = () => {
+    connection.onopen = () => {
+      if (ws !== connection) return;
+
       output.textContent += `Connected as ${username}\n`;
+      usernameInput.disabled = true;
       sendButton.disabled = false;
+      connectButton.disabled = false;
+      connectButton.textContent = "Disconnect";
     };
 
-    ws.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      output.textContent += message.type === "error"
-        ? `Error: ${message.text}\n`
-        : `${message.from} → ${message.to}: ${message.text}\n`;
+    connection.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        output.textContent += message.type === "error"
+          ? `Error: ${message.text}\n`
+          : `${message.from} → ${message.to}: ${message.text}\n`;
+      } catch {
+        output.textContent += `Received: ${event.data}\n`;
+      }
     };
 
-    ws.onclose = () => {
-      output.textContent += "Disconnected. Refresh and connect again.\n";
+    connection.onerror = () => {
+      output.textContent += "WebSocket error; check the server and browser console.\n";
+    };
+
+    connection.onclose = () => {
+      if (ws !== connection) return;
+
+      output.textContent += "Disconnected.\n";
+      ws = null;
+      usernameInput.disabled = false;
       sendButton.disabled = true;
-    };
-
-    ws.onerror = () => {
-      output.textContent += "WebSocket error; check the Go server and browser console.\n";
+      connectButton.disabled = false;
+      connectButton.textContent = "Connect";
     };
   };
 
@@ -60,6 +95,7 @@
       output.textContent += "Connect first.\n";
       return;
     }
+
     if (!to || !text) {
       output.textContent += "Enter a recipient and message.\n";
       return;
