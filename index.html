@@ -3,15 +3,23 @@
   <input id="username" placeholder="sam">
 </label>
 <button id="connect">Connect</button>
+<button id="refresh" disabled>Refresh users</button>
 
 <br><br>
 
 <label>
   Send to:
-  <input id="recipient" placeholder="john">
+  <select id="recipient" disabled>
+    <option value="">Connect to load users</option>
+  </select>
 </label>
-<input id="message" placeholder="Message">
+<input id="message" placeholder="Message" disabled>
 <button id="send" disabled>Send</button>
+
+<br><br>
+
+<strong>Users</strong>
+<ul id="userList"></ul>
 
 <pre id="output"></pre>
 
@@ -19,12 +27,71 @@
   const output = document.getElementById("output");
   const usernameInput = document.getElementById("username");
   const connectButton = document.getElementById("connect");
+  const refreshButton = document.getElementById("refresh");
+  const recipientSelect = document.getElementById("recipient");
+  const messageInput = document.getElementById("message");
   const sendButton = document.getElementById("send");
+  const userList = document.getElementById("userList");
 
-  let ws;
+  let ws = null;
+
+  function log(text) {
+    output.textContent += text + "\n";
+    output.scrollTop = output.scrollHeight;
+  }
+
+  function renderUsers(users) {
+    const previousRecipient = recipientSelect.value;
+
+    userList.replaceChildren();
+    recipientSelect.replaceChildren();
+
+    recipientSelect.add(new Option("Everyone", "all"));
+
+    for (const user of users) {
+      recipientSelect.add(new Option(
+        `${user.name} (${user.online ? "online" : "offline"})`,
+        user.name
+      ));
+
+      const item = document.createElement("li");
+      item.textContent = `${user.name} — ${user.online ? "online" : "offline"}`;
+      userList.appendChild(item);
+    }
+
+    if ([...recipientSelect.options].some(option => option.value === previousRecipient)) {
+      recipientSelect.value = previousRecipient;
+    }
+  }
+
+  function updatePresence(username, online) {
+    const option = [...recipientSelect.options]
+      .find(item => item.value === username);
+
+    if (option) {
+      option.textContent = `${username} (${online ? "online" : "offline"})`;
+    }
+
+    const item = [...userList.children]
+      .find(li => li.textContent.startsWith(`${username} —`));
+
+    if (item) {
+      item.textContent = `${username} — ${online ? "online" : "offline"}`;
+    }
+
+    log(`${username} is ${online ? "online" : "offline"}`);
+  }
+
+  function sendRefresh() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      log("Connect first.");
+      return;
+    }
+
+    ws.send(JSON.stringify({ type: "refresh" }));
+  }
 
   connectButton.onclick = () => {
-    // Disconnect if already connected or connecting.
     if (ws && (
       ws.readyState === WebSocket.OPEN ||
       ws.readyState === WebSocket.CONNECTING
@@ -36,9 +103,8 @@
     }
 
     const username = usernameInput.value.trim();
-
     if (!username) {
-      output.textContent += "Enter your name first.\n";
+      log("Enter your name first.");
       return;
     }
 
@@ -48,60 +114,109 @@
     const connection = new WebSocket(
       `wss://gin-chat-demo.onrender.com/ws?user=${encodeURIComponent(username)}`
     );
+    // const connection = new WebSocket(
+    //   `ws://localhost:8080/ws?user=${encodeURIComponent(username)}`
+    // );
     ws = connection;
 
     connection.onopen = () => {
       if (ws !== connection) return;
 
-      output.textContent += `Connected as ${username}\n`;
+      log(`Connected as ${username}`);
       usernameInput.disabled = true;
+      recipientSelect.disabled = false;
+      messageInput.disabled = false;
       sendButton.disabled = false;
+      refreshButton.disabled = false;
       connectButton.disabled = false;
       connectButton.textContent = "Disconnect";
     };
 
-    connection.onmessage = (event) => {
+    connection.onmessage = event => {
+      let data;
+
       try {
-        const message = JSON.parse(event.data);
-        output.textContent += message.type === "error"
-          ? `Error: ${message.text}\n`
-          : `${message.from} → ${message.to}: ${message.text}\n`;
+        data = JSON.parse(event.data);
       } catch {
-        output.textContent += `Received: ${event.data}\n`;
+        log(`Received: ${event.data}`);
+        return;
+      }
+
+      switch (data.type) {
+        case "users":
+          renderUsers(data.users || []);
+          log("User list refreshed.");
+          break;
+
+        case "presence":
+          updatePresence(data.user, data.online);
+          break;
+
+        case "message":
+          log(`${data.from} → ${data.to}: ${data.text}`);
+          break;
+
+        case "ack":
+          log(`Message to ${data.to}: ${data.status}`);
+          break;
+
+        case "error":
+          log(`Error: ${data.text}`);
+          break;
+
+        default:
+          log(`Received: ${event.data}`);
       }
     };
 
     connection.onerror = () => {
-      output.textContent += "WebSocket error; check the server and browser console.\n";
+      log("WebSocket error; check the server and browser console.");
     };
 
-    connection.onclose = () => {
+    connection.onclose = event => {
       if (ws !== connection) return;
 
-      output.textContent += "Disconnected.\n";
+      log(`Disconnected${event.reason ? `: ${event.reason}` : "."}`);
       ws = null;
       usernameInput.disabled = false;
+      recipientSelect.disabled = true;
+      messageInput.disabled = true;
       sendButton.disabled = true;
+      refreshButton.disabled = true;
       connectButton.disabled = false;
       connectButton.textContent = "Connect";
+      recipientSelect.replaceChildren(
+        new Option("Connect to load users", "")
+      );
+      userList.replaceChildren();
     };
   };
 
-  sendButton.onclick = () => {
-    const to = document.getElementById("recipient").value.trim();
-    const text = document.getElementById("message").value.trim();
+  refreshButton.onclick = sendRefresh;
 
+  function sendMessage() {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      output.textContent += "Connect first.\n";
+      log("Connect first.");
       return;
     }
 
+    const to = recipientSelect.value;
+    const text = messageInput.value.trim();
+
     if (!to || !text) {
-      output.textContent += "Enter a recipient and message.\n";
+      log("Choose a recipient and enter a message.");
       return;
     }
 
     ws.send(JSON.stringify({ to, text }));
-    document.getElementById("message").value = "";
-  };
+    messageInput.value = "";
+  }
+
+  sendButton.onclick = sendMessage;
+
+  messageInput.addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      sendMessage();
+    }
+  });
 </script>
